@@ -32,3 +32,4 @@ const stream = sse('https://api.example.com/stream');
 ## License
 
 MIT
+trigger
