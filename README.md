@@ -7,17 +7,27 @@
 
 ## Install
 
-\`\`\`bash
+```bash
 npm install @creadev.org/network
-\`\`\`
+```
 
 ## Usage
 
-\`\`\`typescript
-import { } from '@creadev.org/network';
+```typescript
+import { NetworkClient, createNetwork, fetch, sse } from '@creadev.org/network';
 
-// ...
-\`\`\`
+const client = createNetwork();
+const data = await fetch('https://api.example.com/data');
+const stream = sse('https://api.example.com/stream');
+```
+
+## API
+
+| Function | Description |
+|----------|-------------|
+| `createNetwork(options?)` | Create network client |
+| `fetch(url, options?)` | Fetch with retry |
+| `sse(url)` | Server-sent events |
 
 ## License
 
