@@ -6,6 +6,6 @@ describe('network utilities', () => {
     expect(typeof isDomainAllowed).toBe('function');
   });
   it('isOnline exists', () => {
-    expect(typeof isOnline).toBe('boolean');
+    expect(typeof isOnline).toBe('function');
   });
 });
