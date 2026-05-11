@@ -33,3 +33,4 @@ const stream = sse('https://api.example.com/stream');
 
 MIT
 trigger
+# Mon May 11 15:11:14 UTC 2026
