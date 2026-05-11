@@ -1,11 +1,11 @@
 /**
  * @creadev.org/network
  *
- * Browser-friendly network tooling for single-HTML apps.
+ * Network tooling, connectivity, poor-internet handling for browser.
  *
  * EXAMPLES:
- * ```javascript
- * import { network, online, fetchWithRetry } from '@creadev.org/network';
+ * ```typescript
+ * import { network, online, isDomainAllowed } from '@creadev.org/network';
  *
  * // Check connectivity
  * if (await online.check()) { ... }
@@ -16,14 +16,26 @@
  * ============================================================================
  */
 
-// Re-export from @creadev.org/qos
-export { withRetry, withTimeout, timeoutSignal, CircuitBreaker } from '@creadev.org/qos';
+import { withRetry, CircuitBreaker } from '@creadev.org/qos/retry';
+import type { RetryOptions } from '@creadev.org/qos/retry';
+import { withTimeout } from '@creadev.org/qos/timeout';
+import type { TimeoutOptions } from '@creadev.org/qos/timeout';
 
 // ============================================================================
 // CONFIG
 // ============================================================================
 
-const CONFIG = {
+export interface NetworkConfig {
+  DEFAULT_TIMEOUT_MS: number;
+  DEFAULT_RETRIES: number;
+  DEFAULT_BACKOFF_MS: number;
+  MAX_BACKOFF_MS: number;
+  LATENCY_SAMPLE_SIZE: number;
+  CIRCUIT_THRESHOLD: number;
+  CACHE_TTL: number;
+}
+
+export const CONFIG: NetworkConfig = {
   DEFAULT_TIMEOUT_MS: 30000,
   DEFAULT_RETRIES: 3,
   DEFAULT_BACKOFF_MS: 1000,
@@ -39,16 +51,16 @@ const CONFIG = {
 
 let _isOnline = true;
 let _lastOnlineCheck = 0;
-let _latencyHistory = [];
+let _latencyHistory: number[] = [];
 let _startTime = Date.now();
 
 // ============================================================================
 // DOMAIN WHITELIST
 // ============================================================================
 
-const _allowedDomains = [];
+const _allowedDomains: string[] = [];
 
-export function isDomainAllowed(url) {
+export function isDomainAllowed(url: string): boolean {
   if (_allowedDomains.length === 0) return true;
   try {
     const hostname = new URL(url).hostname;
@@ -58,12 +70,12 @@ export function isDomainAllowed(url) {
   }
 }
 
-export function setAllowedDomains(domains) {
+export function setAllowedDomains(domains: string[]): void {
   _allowedDomains.length = 0;
   _allowedDomains.push(...domains);
 }
 
-export function getAllowedDomains() {
+export function getAllowedDomains(): string[] {
   return [..._allowedDomains];
 }
 
@@ -71,16 +83,23 @@ export function getAllowedDomains() {
 // CONNECTIVITY
 // ============================================================================
 
-export function isOnline() {
+export function isOnline(): boolean {
   return _isOnline;
 }
 
-export function setOnline(status) {
+export function setOnline(status: boolean): void {
   _isOnline = status;
   _lastOnlineCheck = Date.now();
 }
 
-export async function checkOnline(probeUrl = 'https://www.google.com', timeoutMs = 5000) {
+export async function checkOnline(probeUrl = 'https://www.google.com', timeoutMs = 5000): Promise<boolean> {
+  if (typeof navigator === 'undefined') {
+    // Node.js environment - assume online
+    _isOnline = true;
+    _lastOnlineCheck = Date.now();
+    return true;
+  }
+
   if (!navigator.onLine) {
     _isOnline = false;
     _lastOnlineCheck = Date.now();
@@ -114,13 +133,20 @@ if (typeof window !== 'undefined') {
 // LATENCY
 // ============================================================================
 
-export function getLatency() {
+export function getLatency(): number {
   if (_latencyHistory.length === 0) return 0;
   const sorted = [..._latencyHistory].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-export function getLatencyStats() {
+export interface LatencyStats {
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+  samples: number;
+}
+
+export function getLatencyStats(): LatencyStats {
   if (_latencyHistory.length === 0) return { avg: null, min: null, max: null, samples: 0 };
   const sum = _latencyHistory.reduce((a, b) => a + b, 0);
   return {
@@ -131,8 +157,8 @@ export function getLatencyStats() {
   };
 }
 
-export async function measureLatency(url, sampleSize = CONFIG.LATENCY_SAMPLE_SIZE) {
-  const results = [];
+export async function measureLatency(url: string, sampleSize = CONFIG.LATENCY_SAMPLE_SIZE): Promise<number> {
+  const results: number[] = [];
   const timeoutMs = 10000;
 
   for (let i = 0; i < sampleSize; i++) {
@@ -158,11 +184,11 @@ export async function measureLatency(url, sampleSize = CONFIG.LATENCY_SAMPLE_SIZ
 // TIMING HELPERS
 // ============================================================================
 
-export function sleep(ms) {
+export function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-export function isExpired(timestamp, maxAgeMs) {
+export function isExpired(timestamp: number, maxAgeMs: number): boolean {
   return Date.now() - timestamp > maxAgeMs;
 }
 
@@ -170,9 +196,14 @@ export function isExpired(timestamp, maxAgeMs) {
 // CACHE (In-memory)
 // ============================================================================
 
-const _cache = new Map();
+interface CacheEntry {
+  value: unknown;
+  expiry: number | null;
+}
 
-export function cacheGet(key) {
+const _cache = new Map<string, CacheEntry>();
+
+export function cacheGet(key: string): unknown {
   const entry = _cache.get(key);
   if (!entry) return null;
   if (entry.expiry && Date.now() > entry.expiry) {
@@ -182,24 +213,24 @@ export function cacheGet(key) {
   return entry.value;
 }
 
-export function cacheSet(key, value, ttlMs = CONFIG.CACHE_TTL) {
+export function cacheSet(key: string, value: unknown, ttlMs = CONFIG.CACHE_TTL): void {
   _cache.set(key, {
     value,
     expiry: ttlMs ? Date.now() + ttlMs : null
   });
 }
 
-export function cacheClear() {
+export function cacheClear(): void {
   _cache.clear();
 }
 
 const _networkCache = { enabled: true, ttl: CONFIG.CACHE_TTL };
 
-export function setCacheEnabled(enabled) {
+export function setCacheEnabled(enabled: boolean): void {
   _networkCache.enabled = enabled;
 }
 
-export function isCacheEnabled() {
+export function isCacheEnabled(): boolean {
   return _networkCache.enabled;
 }
 
@@ -207,9 +238,9 @@ export function isCacheEnabled() {
 // NETWORK FETCH
 // ============================================================================
 
-let _circuit = null;
+let _circuit: CircuitBreaker | null = null;
 
-function getCircuit() {
+function getCircuit(): CircuitBreaker {
   if (!_circuit) {
     _circuit = new CircuitBreaker({
       failureThreshold: CONFIG.CIRCUIT_THRESHOLD,
@@ -219,7 +250,20 @@ function getCircuit() {
   return _circuit;
 }
 
-export async function networkFetch(url, options = {}) {
+export interface FetchOptions {
+  method?: string;
+  cache?: boolean;
+  circuit?: boolean;
+  timeout?: number;
+  retries?: number;
+  backoff?: number;
+  maxBackoff?: number;
+  headers?: Record<string, string>;
+  skipDomainCheck?: boolean;
+  body?: string | FormData;
+}
+
+export async function networkFetch(url: string, options: FetchOptions = {}): Promise<Response> {
   const {
     method = 'GET',
     cache: useCache = true,
@@ -238,15 +282,15 @@ export async function networkFetch(url, options = {}) {
 
   if (method === 'GET' && _networkCache.enabled && useCache) {
     const cached = cacheGet('net:' + url);
-    if (cached) return cached;
+    if (cached) return cached as Response;
   }
 
-  const doFetch = async () => {
+  const doFetch = async (): Promise<Response> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const response = await fetch(url, { method, headers, signal: controller.signal });
+      const response = await fetch(url, { method, headers, signal: controller.signal, body: options.body });
       clearTimeout(timeoutId);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response;
@@ -256,14 +300,16 @@ export async function networkFetch(url, options = {}) {
     }
   };
 
+  const retryOptions: RetryOptions = { retries, baseDelayMs: backoff, maxDelayMs: maxBackoff };
+
   if (useCircuit) {
-    return getCircuit().execute(() => withRetry(doFetch, { retries, baseDelayMs: backoff, maxDelayMs: maxBackoff }));
+    return getCircuit().execute(() => withRetry(doFetch, retryOptions));
   }
 
-  return withRetry(doFetch, { retries, baseDelayMs: backoff, maxDelayMs: maxBackoff });
+  return withRetry(doFetch, retryOptions);
 }
 
-export async function fetchJson(url, options = {}) {
+export async function fetchJson(url: string, options: FetchOptions = {}): Promise<unknown> {
   const response = await networkFetch(url, {
     ...options,
     headers: { ...options.headers, 'Accept': 'application/json' }
@@ -275,7 +321,7 @@ export async function fetchJson(url, options = {}) {
   }
 }
 
-export async function fetchText(url, options = {}) {
+export async function fetchText(url: string, options: FetchOptions = {}): Promise<string> {
   const response = await networkFetch(url, options);
   return response.text();
 }
@@ -284,11 +330,11 @@ export async function fetchText(url, options = {}) {
 // SHORTCUTS
 // ============================================================================
 
-export async function fetchWithRetry(url, options = {}) {
+export async function fetchWithRetry(url: string, options: FetchOptions = {}): Promise<Response> {
   return networkFetch(url, { ...options, circuit: false });
 }
 
-export async function fetchJsonWithRetry(url, options = {}) {
+export async function fetchJsonWithRetry(url: string, options: FetchOptions = {}): Promise<unknown> {
   const response = await networkFetch(url, {
     ...options,
     circuit: false,
@@ -305,7 +351,14 @@ export async function fetchJsonWithRetry(url, options = {}) {
 // STATUS
 // ============================================================================
 
-export function getStatus() {
+export interface NetworkStatus {
+  online: boolean;
+  lastCheck: number;
+  latency: LatencyStats;
+  uptime: number;
+}
+
+export function getStatus(): NetworkStatus {
   return {
     online: _isOnline,
     lastCheck: _lastOnlineCheck,
@@ -314,19 +367,39 @@ export function getStatus() {
   };
 }
 
-export function getCircuitStatus() {
-  if (!_circuit) return { closed: true };
-  return _circuit.getStatus();
+export interface CircuitStatus {
+  state: 'closed' | 'open' | 'half-open';
+  retryAfter: number;
 }
 
-export function clear() {
+export function getCircuitStatus(): CircuitStatus {
+  const c = _circuit;
+  if (!c) return { state: 'closed', retryAfter: 0 };
+  return {
+    state: c.status,
+    retryAfter: c.retryAfter
+  };
+}
+
+export function clear(): void {
   _latencyHistory = [];
   _startTime = Date.now();
   _cache.clear();
 }
 
 // ============================================================================
-// EXPORTS
+// RE-EXPORTS from qos (for convenience)
+// ============================================================================
+
+export { withRetry } from '@creadev.org/qos/retry';
+export type { RetryOptions } from '@creadev.org/qos/retry';
+export { withTimeout } from '@creadev.org/qos/timeout';
+export type { TimeoutOptions } from '@creadev.org/qos/timeout';
+export { CircuitBreaker } from '@creadev.org/qos/retry';
+export type { CircuitBreakerOptions } from '@creadev.org/qos/retry';
+
+// ============================================================================
+// EXPORTS BARREL
 // ============================================================================
 
 export const network = {
