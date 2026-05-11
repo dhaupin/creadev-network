@@ -1,0 +1,30 @@
+{
+  "name": "@creadev.org/network",
+  "version": "0.3.1",
+  "type": "module",
+  "description": "Network tooling, connection management, poor-internet handling, and other client network tooling",
+  "keywords": [
+    "network",
+    "connectivity",
+    "offline",
+    "retry",
+    "circuit-breaker"
+  ],
+  "author": "dhaupin",
+  "repository": "https://github.com/dhaupin/creadev-network",
+  "license": "MIT",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@creadev.org/qos": "^0.3.1"
+  },
+  "scripts": {
+    "test": "echo 'No tests yet'"
+  },
+  "files": [
+    "src"
+  ]
+}
